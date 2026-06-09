@@ -37,7 +37,12 @@ function startInboundServer(emitter, config) {
         return;
       }
 
-      emitter.emit('event', data);
+      try {
+        const json = JSON.parse(data);
+        emitter.emit('event', json);
+      } catch (err) {
+        console.error('[Inbound] Failed to parse message as JSON:', err.message);
+      }
     });
 
     clientWs.on('close', () => {

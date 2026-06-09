@@ -1,6 +1,6 @@
 {
   "name": "ccd-lyric-relay",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Web server that accepts events via Websocket and provides a page for the lyrics",
   "main": "src/index.js",
   "scripts": {

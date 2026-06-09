@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CCD Lyrics Relay</title>
+  <style>
+    /* -----------------------------------------------------------------------
+       Reset & base
+    ----------------------------------------------------------------------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+
+      /*
+       * Using a system serif stack here gives us a clean, readable face
+       * that's guaranteed to be available with no network request.
+       * The slightly condensed character of Georgia / serif handles
+       * long lines better than a wide sans-serif.
+       */
+      font-family: Georgia, 'Times New Roman', Times, serif;
+    }
+
+    /* -----------------------------------------------------------------------
+       Layout: one full-screen flex container
+    ----------------------------------------------------------------------- */
+    #stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      padding: 4vw;           /* breathing room at the edges */
+    }
+
+    /* -----------------------------------------------------------------------
+       Lyrics container
+       Each .line is one text element from the slide.
+    ----------------------------------------------------------------------- */
+    #lyrics {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25em;            /* relative gap — scales with font size */
+    }
+
+    .line {
+      /*
+       * white-space: nowrap is essential — it prevents the browser
+       * from wrapping the line, so our resize logic can measure the
+       * true single-line width and shrink the font to fit.
+       */
+      white-space: nowrap;
+      line-height: 1.15;
+      text-align: center;
+      width: 100%;
+
+      /*
+       * Subtle transition so a font-size change caused by a new slide
+       * doesn't feel like a hard jump.
+       */
+      transition: font-size 0.15s ease;
+    }
+
+    /* -----------------------------------------------------------------------
+       Status overlay — shown when disconnected or waiting for content
+    ----------------------------------------------------------------------- */
+    #status {
+      position: fixed;
+      bottom: 2vh;
+      left: 50%;
+      transform: translateX(-50%);
+
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: clamp(10px, 1.5vw, 14px);
+      color: rgba(255, 255, 255, 0.18);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      pointer-events: none;
+
+      transition: opacity 0.5s ease;
+    }
+
+    #status.hidden {
+      opacity: 0;
+    }
+
+    #connection-status {
+      position: fixed;
+      top: 2vh;
+      left: 2vh;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+    }
+
+    #connection-status.disconnected {
+      background: red;
+    }
+
+    #connection-status.connected {
+      background: green;
+    }
+
+    /* -----------------------------------------------------------------------
+       Blanked state — when audience screens are disabled in ProPresenter
+    ----------------------------------------------------------------------- */
+    body.blanked #lyrics {
+      opacity: 0;
+    }
+
+    #lyrics {
+      transition: opacity 0.4s ease;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="stage">
+    <div id="connection-status"></div>
+    <div id="lyrics"></div>
+  </div>
+
+  <div id="status">Connecting…</div>
+
+  <script>
+    // -------------------------------------------------------------------------
+    // DOM refs
+    // -------------------------------------------------------------------------
+    const lyricsEl = document.getElementById('lyrics');
+    const statusEl = document.getElementById('status');
+    const stageEl  = document.getElementById('stage');
+    const connectionStatusEl = document.getElementById('connection-status');
+
+    // -------------------------------------------------------------------------
+    // Font sizing
+    //
+    // Strategy: set every line to the same font size, determined by whichever
+    // line is the longest (i.e. would overflow first). We binary-search for
+    // the largest font size (in px) where the widest line still fits within
+    // the stage width.
+    //
+    // We use a hidden off-screen <span> as a probe so we can measure text
+    // width without affecting the live layout.
+    // -------------------------------------------------------------------------
+    const probe = document.createElement('span');
+    probe.style.cssText = [
+      'position:absolute',
+      'top:-9999px',
+      'left:-9999px',
+      'white-space:nowrap',
+      'visibility:hidden',
+      `font-family:${getComputedStyle(document.body).fontFamily}`,
+    ].join(';');
+    document.body.appendChild(probe);
+
+    /**
+     * Measure how wide a string would render at a given font size (px).
+     * @param {string} text
+     * @param {number} sizePx
+     * @returns {number} width in pixels
+     */
+    function measureWidth(text, sizePx) {
+      probe.style.fontSize = sizePx + 'px';
+      probe.textContent = text;
+      return probe.getBoundingClientRect().width;
+    }
+
+    /**
+     * Find the largest integer font size (px) at which ALL lines fit within
+     * `maxWidth` without wrapping.
+     *
+     * @param {string[]} lines
+     * @param {number}   maxWidth   — available width in px (stage minus padding)
+     * @param {number}   maxHeight  — available height in px
+     * @param {number}   lineCount  — number of lines (to factor in height)
+     * @returns {number} font size in px
+     */
+    function fitFontSize(lines, maxWidth, maxHeight, lineCount) {
+      if (!lines.length) return 16;
+
+      // Upper bound: if there's only one short line it could theoretically be
+      // enormous — cap at something visually sane.
+      let lo = 8;
+      let hi = 800;
+
+      // Estimate height per line ≈ fontSize * lineHeight * lineCount + gaps.
+      // gap is 0.25em between lines → (lineCount - 1) * 0.25 * fontSize
+      // Total height ≈ fontSize * (lineCount * 1.15 + (lineCount - 1) * 0.25)
+      const heightFactor = lineCount * 1.15 + Math.max(0, lineCount - 1) * 0.25;
+
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi + 1) / 2);
+
+        const widthOk  = lines.every(l => measureWidth(l, mid) <= maxWidth);
+        const heightOk = (mid * heightFactor) <= maxHeight;
+
+        if (widthOk && heightOk) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      return lo;
+    }
+
+    /**
+     * Re-render the current lines at the optimal font size.
+     * Called whenever the slide changes OR the window is resized.
+     */
+    let currentLines = [];
+
+    function renderLines(lines) {
+      currentLines = lines;
+
+      // Clear previous content
+      lyricsEl.innerHTML = '';
+
+      if (!lines.length) return;
+
+      // Available space — stage padding is 4vw on each side
+      const paddingPx = stageEl.offsetWidth * 0.04;
+      const maxWidth  = stageEl.offsetWidth  - paddingPx * 2;
+      const maxHeight = stageEl.offsetHeight - paddingPx * 2;
+
+      const size = fitFontSize(lines, maxWidth, maxHeight, lines.length);
+
+      lines.forEach(text => {
+        const div = document.createElement('div');
+        div.className = 'line';
+        div.style.fontSize = size + 'px';
+        div.textContent = text;
+        lyricsEl.appendChild(div);
+      });
+    }
+
+    // Re-fit on window resize (e.g. phone rotated, browser resized)
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => renderLines(currentLines), 80);
+    });
+
+    // -------------------------------------------------------------------------
+    // Status helper
+    // -------------------------------------------------------------------------
+    function setStatus(text) {
+      statusEl.textContent = text;
+      statusEl.classList.remove('hidden');
+    }
+
+    function hideStatus() {
+      statusEl.classList.add('hidden');
+    }
+
+    // -------------------------------------------------------------------------
+    // WebSocket connection
+    // -------------------------------------------------------------------------
+    const RECONNECT_DELAY_MS = 3000;
+
+    function connect() {
+      const url = `ws://${location.host}`;
+      setStatus('Connecting…');
+
+      const ws = new WebSocket(url);
+
+      ws.addEventListener('open', () => {
+        setStatus('Connected');
+        // Hide the status indicator after a short moment so it doesn't
+        // distract when content is visible
+        setTimeout(hideStatus, 2000);
+      });
+
+      ws.addEventListener('message', (event) => {
+        let msg;
+        try {
+          msg = JSON.parse(event.data);
+        } catch {
+          console.warn('Could not parse message:', event.data);
+          return;
+        }
+
+        handleMessage(msg);
+      });
+
+      ws.addEventListener('close', () => {
+        setStatus(`Reconnecting in ${RECONNECT_DELAY_MS / 1000}s…`);
+        setTimeout(connect, RECONNECT_DELAY_MS);
+      });
+
+      ws.addEventListener('error', () => {
+        // 'close' will fire immediately after, which handles reconnect
+        setStatus('Connection error');
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // Message handlers — one per message type from lyricsServer.js
+    // -------------------------------------------------------------------------
+    const handlers = {
+      /**
+       * hello — initial greeting from the server before any slide has fired.
+       * Nothing to render; just keep the status visible.
+       */
+      hello(msg) {
+        setStatus('Waiting for first slide…');
+      },
+
+
+
+      /**
+       * lyrics — a slide with text content.
+       * Render the lines as large as they'll fit.
+       */
+      lyrics(msg) {
+        document.body.classList.remove('blanked');
+        renderLines(msg.lines ?? []);
+        hideStatus();
+      },
+
+      /**
+       * clear — a blank slide (e.g. between songs, or a media-only slide).
+       * Empty the display.
+       */
+      clear(msg) {
+        document.body.classList.remove('blanked');
+        renderLines([]);
+        hideStatus();
+      },
+
+      /**
+       * presentation — the active song/presentation changed.
+       * We receive this but don't display it on the lyrics page;
+       * it's available here if you want to add a song-title overlay.
+       */
+      presentation(msg) {
+        // Optional: document.title = msg.name ?? 'Lyrics';
+        console.log('Presentation:', msg.name);
+      },
+
+      /**
+       * audience_screens — operator enabled/disabled output in ProPresenter.
+       * When disabled, fade out the lyrics so the display is blank.
+       */
+      audience_screens(msg) {
+        if (msg.enabled === false) {
+          document.body.classList.add('blanked');
+        } else {
+          document.body.classList.remove('blanked');
+        }
+      },
+
+      connection_status(msg) {
+        connectionStatusEl.classList.remove('connected', 'disconnected');
+        connectionStatusEl.classList.add(msg.status);
+      }
+    };
+
+    function handleMessage(msg) {
+      const handler = handlers[msg.type];
+      if (handler) {
+        handler(msg);
+      } else {
+        console.log('Unhandled message type:', msg.type, msg);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Start
+    // -------------------------------------------------------------------------
+    connect();
+  </script>
+</body>
+</html>

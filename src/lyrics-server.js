@@ -4,6 +4,21 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 
+const MSG = {
+  HELLO: 'hello',
+  LYRICS: 'lyrics',
+  CLEAR: 'clear',
+  PRESENTATION: 'presentation',
+  AUDIENCE_SCREENS: 'audience_screens',
+  CONNECTION_STATUS: 'connection_status',
+  INBOUND_CONNECTION_STATUS: 'inbound_connection_status',
+};
+
+const state = {
+  [MSG.CONNECTION_STATUS]: { type: MSG.CONNECTION_STATUS, status: 'disconnected' },
+  [MSG.INBOUND_CONNECTION_STATUS]: { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' },
+};
+
 function startLyricsServer(emitter, config) {
   const app = express();
   const server = http.createServer(app);
@@ -23,6 +38,7 @@ function startLyricsServer(emitter, config) {
   // Accept client connections
   wss.on('connection', (clientWs) => {
     console.log('[Lyrics] Client connected');
+    sendInitialState(clientWs);
   });
 
   server.listen(config.port, () => {
@@ -34,9 +50,18 @@ function startLyricsServer(emitter, config) {
   });
 }
 
+function sendInitialState(client) {
+  Object.keys(state).forEach((key) => {
+    safeSend(client, state[key]);
+  });
+}
+
 function broadcast(wss, payload) {
   const json = JSON.stringify(payload);
   let sent = 0;
+
+  const key = payload.type || 'unknown';
+  state[key] = payload;
 
   for (const client of wss.clients) {
     if (safeSend(client, payload)) {
@@ -62,4 +87,4 @@ function safeSend(ws, payload) {
   return success;
 }
 
-module.exports = { startLyricsServer };
+module.exports = { startLyricsServer, MSG };

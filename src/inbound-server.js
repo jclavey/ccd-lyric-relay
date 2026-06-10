@@ -1,6 +1,7 @@
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
+const { MSG } = require('./lyrics-server');
 
 function startInboundServer(emitter, config) {
   const app = express();
@@ -24,6 +25,7 @@ function startInboundServer(emitter, config) {
     }
 
     activeInboundSocket = newSocket;
+    emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'connected' });
   }
 
   // Accept client connections
@@ -46,12 +48,18 @@ function startInboundServer(emitter, config) {
     });
 
     clientWs.on('close', () => {
+      if (activeInboundSocket == clientWs) {
+        emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
+      }
       detachInboundSocket(clientWs);
       console.log('[Inbound] Client disconnected');
     });
 
     clientWs.on('error', (error) => {
       console.error('[Inbound] Client socket error', error);
+      if (activeInboundSocket == clientWs) {
+        emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
+      }
       detachInboundSocket(clientWs);
     });
   });

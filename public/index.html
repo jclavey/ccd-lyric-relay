@@ -96,20 +96,27 @@
       opacity: 0;
     }
 
-    #connection-status {
+    #connection-status, #inbound_connection-status {
       position: fixed;
       top: 2vh;
-      left: 2vh;
       width: 6px;
       height: 6px;
       border-radius: 50%;
     }
 
-    #connection-status.disconnected {
+    #connection-status {
+      left: 4vh;  
+    }
+
+    #inbound_connection-status {
+      left: 2vh;
+    }
+
+    #connection-status.disconnected, #inbound_connection-status.disconnected {
       background: red;
     }
 
-    #connection-status.connected {
+    #connection-status.connected, #inbound_connection-status.connected {
       background: green;
     }
 
@@ -129,6 +136,7 @@
 
   <div id="stage">
     <div id="connection-status"></div>
+    <div id="inbound_connection-status"></div>
     <div id="lyrics"></div>
   </div>
 
@@ -142,6 +150,7 @@
     const statusEl = document.getElementById('status');
     const stageEl  = document.getElementById('stage');
     const connectionStatusEl = document.getElementById('connection-status');
+    const inboundConnectionStatusEl = document.getElementById('inbound_connection-status');
 
     // -------------------------------------------------------------------------
     // Font sizing
@@ -366,6 +375,11 @@
       connection_status(msg) {
         connectionStatusEl.classList.remove('connected', 'disconnected');
         connectionStatusEl.classList.add(msg.status);
+      },
+
+      inbound_connection_status(msg) {
+        inboundConnectionStatusEl.classList.remove('connected', 'disconnected');
+        inboundConnectionStatusEl.classList.add(msg.status);
       }
     };
 

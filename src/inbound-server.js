@@ -6,7 +6,33 @@ const { MSG } = require('./lyrics-server');
 function startInboundServer(emitter, config) {
   const app = express();
   const server = http.createServer(app);
-  const wss = new WebSocket.Server({ server });
+  const apiToken = config.apiToken;
+  const wss = new WebSocket.Server({
+    server,
+    verifyClient: (info, callback) => {
+      const requestUrl = new URL(info.req.url || '/', 'http://localhost');
+      const providedToken =
+        requestUrl.searchParams.get('token') ||
+        requestUrl.searchParams.get('apiToken') ||
+        requestUrl.searchParams.get('api_token') ||
+        info.req.headers['x-api-token'] ||
+        info.req.headers.authorization?.replace(/^Bearer\s+/i, '');
+
+      if (!apiToken) {
+        console.warn('[Inbound] No API token configured; rejecting inbound websocket connection');
+        callback(false, 401, 'Unauthorized');
+        return;
+      }
+
+      if (!providedToken || providedToken !== apiToken) {
+        console.warn('[Inbound] Rejected inbound websocket connection without a valid API token');
+        callback(false, 401, 'Unauthorized');
+        return;
+      }
+
+      callback(true);
+    },
+  });
 
   let activeInboundSocket = null;
 
@@ -67,6 +93,8 @@ function startInboundServer(emitter, config) {
   server.listen(config.port, () => {
     console.log(`[Inbound] Event source listening on port ${config.port}`);
   });
+
+  return { server, wss };
 }
 
 module.exports = { startInboundServer };

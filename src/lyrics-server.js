@@ -12,6 +12,7 @@ const MSG = {
   AUDIENCE_SCREENS: 'audience_screens',
   CONNECTION_STATUS: 'connection_status',
   INBOUND_CONNECTION_STATUS: 'inbound_connection_status',
+  LOOK: 'look'
 };
 
 const state = {

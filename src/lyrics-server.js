@@ -5,18 +5,12 @@ const path = require('path');
 const fs = require('fs');
 
 const MSG = {
-  HELLO: 'hello',
-  LYRICS: 'lyrics',
-  CLEAR: 'clear',
-  PRESENTATION: 'presentation',
-  AUDIENCE_SCREENS: 'audience_screens',
-  CONNECTION_STATUS: 'connection_status',
   INBOUND_CONNECTION_STATUS: 'inbound_connection_status',
-  LOOK: 'look'
+  INBOUND_EVENT: 'inbound_event'
 };
 
 const state = {
-  [MSG.CONNECTION_STATUS]: { type: MSG.CONNECTION_STATUS, status: 'disconnected' },
+  [MSG.INBOUND_EVENT]: { type: MSG.INBOUND_EVENT, payload: {} },
   [MSG.INBOUND_CONNECTION_STATUS]: { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' },
 };
 

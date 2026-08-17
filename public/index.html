@@ -74,6 +74,13 @@
       transition: font-size 0.15s ease;
     }
 
+    /* Allow wrapping for scripture lines */
+    .line.wrap {
+      white-space: normal;
+      word-break: break-word;
+      hyphens: auto;
+    }
+
     /* -----------------------------------------------------------------------
        Status overlay — shown when disconnected or waiting for content
     ----------------------------------------------------------------------- */
@@ -135,6 +142,32 @@
     #lyrics {
       transition: opacity 0.4s ease;
     }
+    /* Scripture reference shown at bottom of the page */
+    #reference-bar {
+    position: fixed;
+    bottom: 13vh;
+    width: 80%;
+    border-top: 3px solid white;
+    }
+    #reference {
+      position: fixed;
+      bottom: 6vh; /* above the status element */
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 3em;
+      color: rgba(255, 255, 255, 0.9);
+      pointer-events: none;
+      text-align: center;
+      transition: opacity 0.2s ease;
+    }
+
+    #reference-bar.hidden {
+      opacity: 0;
+    }
+
+    #reference.hidden {
+      opacity: 0;
+    }
   </style>
 </head>
 <body>
@@ -143,6 +176,8 @@
     <div id="connection-status"></div>
     <div id="inbound_connection-status"></div>
     <div id="lyrics"></div>
+    <div id="reference-bar" class="hidden"></div>
+    <div id="reference" class="hidden"></div>
   </div>
 
   <div id="status">Connecting…</div>
@@ -156,6 +191,8 @@
     const stageEl  = document.getElementById('stage');
     const connectionStatusEl = document.getElementById('connection-status');
     const inboundConnectionStatusEl = document.getElementById('inbound_connection-status');
+    const referenceEl = document.getElementById('reference');
+    const referenceBarEl = document.getElementById('reference-bar');
 
     // -------------------------------------------------------------------------
     // Font sizing
@@ -236,7 +273,8 @@
      */
     let currentLines = [];
 
-    function renderLines(lines) {
+    function renderLines(lines, opts = {}) {
+      const { wrap = false, minSize = 8 } = opts;
       currentLines = lines;
 
       // Clear previous content
@@ -249,11 +287,23 @@
       const maxWidth  = stageEl.offsetWidth  - paddingPx * 2;
       const maxHeight = stageEl.offsetHeight - paddingPx * 2;
 
-      const size = fitFontSize(lines, maxWidth, maxHeight, lines.length);
+      let size;
+
+      if (wrap) {
+        // When wrapping is allowed (Scripture), compute size based on height
+        // so lines can wrap naturally. Use a minimum font size.
+        // const lineCount = Math.max(1, lines.length);
+        // const heightFactor = lineCount * 1.15 + Math.max(0, lineCount - 1) * 0.25;
+        // size = Math.floor(maxHeight / heightFactor);
+        // size = Math.max(minSize, size);
+        size = 40; // fixed size for scripture
+      } else {
+        size = fitFontSize(lines, maxWidth, maxHeight, lines.length);
+      }
 
       lines.forEach(text => {
         const div = document.createElement('div');
-        div.className = 'line';
+        div.className = wrap ? 'line wrap' : 'line';
         div.style.fontSize = size + 'px';
         div.textContent = text;
         lyricsEl.appendChild(div);
@@ -325,70 +375,88 @@
     // Message handlers — one per message type from lyricsServer.js
     // -------------------------------------------------------------------------
     const handlers = {
-      /**
-       * hello — initial greeting from the server before any slide has fired.
-       * Nothing to render; just keep the status visible.
-       */
-      hello(msg) {
-        setStatus('Waiting for first slide…');
-      },
-
-      /**
-       * lyrics — a slide with text content.
-       * Render the lines as large as they'll fit.
-       */
-      lyrics(msg) {
-        renderLines(msg.lines ?? []);
-        hideStatus();
-      },
-
-      /**
-       * clear — a blank slide (e.g. between songs, or a media-only slide).
-       * Empty the display.
-       */
-      clear(msg) {
-        renderLines([]);
-        hideStatus();
-      },
-
-      look(msg) {
-        if (msg.name === 'Song') {
-          document.body.classList.remove('cleared');
-        } else {
-          document.body.classList.add('cleared');
-        }
-      },
-
-      /**
-       * presentation — the active song/presentation changed.
-       * We receive this but don't display it on the lyrics page;
-       * it's available here if you want to add a song-title overlay.
-       */
-      presentation(msg) {
-        // Optional: document.title = msg.name ?? 'Lyrics';
-        console.log('Presentation:', msg.name);
-      },
-
-      /**
-       * audience_screens — operator enabled/disabled output in ProPresenter.
-       * When disabled, fade out the lyrics so the display is blank.
-       */
-      audience_screens(msg) {
-        if (msg.enabled === false) {
-          document.body.classList.add('blanked');
-        } else {
-          document.body.classList.remove('blanked');
-        }
-      },
-
-      connection_status(msg) {
-        connectionStatusEl.classList.remove('connected', 'disconnected');
-        connectionStatusEl.classList.add(msg.status);
-      },
-
       inbound_connection_status(msg) {
         inboundConnectionStatusEl.classList.remove('connected', 'disconnected');
         inboundConnectionStatusEl.classList.add(msg.status);
+      },
+      /**
+       * state — combined event containing slide, view, presentation,
+       * screens, look, and connectionStatus.
+       */
+      inbound_event(eventJson) {
+        const msg = eventJson.payload;
+
+        const isScripture = (msg.look && msg.look.name === 'Scripture') || (msg.view && msg.view.lookName === 'Scripture');
+
+        // Slide content (lyrics / clear). For Scripture, first line is the
+        // reference shown at the bottom; remaining lines are rendered as body.
+        if (msg.slide) {
+          const lines = msg.slide.lines ?? [];
+          if (isScripture && lines.length) {
+            const reference = lines[0];
+            const bodyLines = lines.slice(1);
+            referenceEl.textContent = reference;
+            referenceEl.classList.remove('hidden');
+            referenceBarEl.classList.remove('hidden');
+            renderLines(bodyLines, { wrap: true, minSize: 20 });
+            hideStatus();
+          } else if (lines.length) {
+            referenceEl.textContent = '';
+            referenceEl.classList.add('hidden');
+            referenceBarEl.classList.add('hidden');
+            renderLines(lines);
+            hideStatus();
+          } else {
+            referenceEl.textContent = '';
+            referenceEl.classList.add('hidden');
+            referenceBarEl.classList.add('hidden');
+            renderLines([]);
+            hideStatus();
+          }
+        }
+
+        // Audience screens
+        if (msg.screens) {
+          if (msg.screens.enabled === false) {
+            document.body.classList.add('blanked');
+          } else {
+            document.body.classList.remove('blanked');
+          }
+        }
+
+        // Look (cleared vs song/scripture)
+        if (msg.look) {
+          if (msg.look.name === 'Song' || msg.look.name === 'Scripture') {
+            document.body.classList.remove('cleared');
+          } else {
+            document.body.classList.add('cleared');
+          }
+        }
+
+        // Presentation / song metadata (logged for now)
+        if (msg.presentation) {
+          console.log('Presentation:', msg.presentation.name);
+        }
+
+        // View may also contain presentationName and lookName
+        if (msg.view) {
+          if (msg.view.presentationName) console.log('Presentation:', msg.view.presentationName);
+          if (msg.view.lookName) {
+            if (msg.view.lookName === 'Song' || msg.view.lookName === 'Scripture') document.body.classList.remove('cleared');
+            else document.body.classList.add('cleared');
+          }
+        }
+
+        // Connection statuses
+        if (msg.connectionStatus) {
+          connectionStatusEl.classList.remove('connected', 'disconnected');
+          connectionStatusEl.classList.add(msg.connectionStatus.status);
+        }
+
+        if (msg.inboundConnectionStatus) {
+          inboundConnectionStatusEl.classList.remove('connected', 'disconnected');
+          inboundConnectionStatusEl.classList.add(msg.inboundConnectionStatus.status);
+        }
       }
     };
 

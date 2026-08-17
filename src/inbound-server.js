@@ -67,7 +67,7 @@ function startInboundServer(emitter, config) {
 
       try {
         const json = JSON.parse(data);
-        emitter.emit('event', json);
+        emitter.emit('event', { type: MSG.INBOUND_EVENT, payload: json });
       } catch (err) {
         console.error('[Inbound] Failed to parse message as JSON:', err.message);
       }

@@ -133,7 +133,9 @@
     /* -----------------------------------------------------------------------
        Blanked state — when audience screens are disabled in ProPresenter
     ----------------------------------------------------------------------- */
-    body.blanked #lyrics {
+    body.blanked #lyrics,
+    body.blanked #reference,
+    body.blanked #reference-bar {
       opacity: 0;
     }
 
@@ -173,6 +175,7 @@
       bottom: 13vh;
       width: 80%;
       border-top: 3px solid white;
+      transition: opacity 0.2s ease;
     }
     #reference {
       position: fixed;
@@ -196,7 +199,7 @@
     }
   </style>
 </head>
-<body>
+<body class="blanked">
 
   <div id="stage">
     <div id="connection-status"></div>
@@ -457,6 +460,11 @@
 
         const isScripture = msg.look === 'Scripture';
 
+        // Audience screens (null = not yet known). Applied before rendering;
+        // the page starts blanked so a first slide with screens off never
+        // fades out from full opacity.
+        document.body.classList.toggle('blanked', msg.audienceScreensEnabled === false);
+
         // Look (cleared vs song/scripture); leave as-is until a look is known.
         // Applied before rendering so text is measured while visible.
         if (msg.look) {
@@ -481,9 +489,6 @@
         hideStatus();
         waitingEl.classList.add('hidden');
 
-        // Audience screens (null = not yet known)
-        document.body.classList.toggle('blanked', msg.audienceScreensEnabled === false);
-
         // Presentation / song metadata (logged for now)
         if (msg.presentation) {
           console.log('Presentation:', msg.presentation.name);
@@ -500,7 +505,8 @@
       referenceEl.textContent = '';
       referenceEl.classList.add('hidden');
       referenceBarEl.classList.add('hidden');
-      document.body.classList.remove('blanked', 'cleared', 'scripture');
+      document.body.classList.remove('cleared', 'scripture');
+      document.body.classList.add('blanked');
       connectionStatusEl.classList.remove('connected', 'disconnected');
       waitingEl.classList.remove('hidden');
     }

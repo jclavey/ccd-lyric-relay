@@ -11,6 +11,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
 const path = require('path');
+const { keepAlive } = require('./keep-alive');
 
 const MSG = {
   INBOUND_CONNECTION_STATUS: 'inbound_connection_status',
@@ -19,7 +20,7 @@ const MSG = {
 
 /**
  * @param {import('events').EventEmitter} emitter
- * @param {{ port: number }} config
+ * @param {{ port: number, pingIntervalMs?: number }} config
  */
 function startDisplayServer(emitter, config) {
   const state = {
@@ -32,6 +33,7 @@ function startDisplayServer(emitter, config) {
 
   const server = http.createServer(app);
   const wss = new WebSocket.Server({ server });
+  keepAlive(wss, config.pingIntervalMs ?? 30 * 1000);
 
   wss.on('connection', (clientWs) => {
     console.log(`[Display] Client connected (${wss.clients.size} total)`);

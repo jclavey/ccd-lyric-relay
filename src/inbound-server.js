@@ -5,17 +5,30 @@
  * required) and re-emits each JSON message as an 'event' for the display
  * server. Only one bridge connection is active at a time; a newer one
  * replaces the old.
+ *
+ * When the bridge disconnects, the last state is kept for `stateGraceMs` so a
+ * brief network drop doesn't blank everyone's screen, then cleared. A bridge
+ * that closes deliberately (broadcast turned off) clears it immediately.
  */
 
 const WebSocket = require('ws');
 const http = require('http');
 const { MSG } = require('./display-server');
+const { keepAlive } = require('./keep-alive');
+
+// Close code/reason the bridge sends when broadcasting is turned off.
+const BROADCAST_DISABLED = { code: 1000, reason: 'broadcast disabled' };
+
+const DEFAULT_STATE_GRACE_MS = 60 * 1000;
+const DEFAULT_PING_INTERVAL_MS = 30 * 1000;
 
 /**
  * @param {import('events').EventEmitter} emitter
- * @param {{ port: number, apiToken?: string }} config
+ * @param {{ port: number, apiToken?: string, stateGraceMs?: number, pingIntervalMs?: number }} config
  */
 function startInboundServer(emitter, config) {
+  const stateGraceMs = config.stateGraceMs ?? DEFAULT_STATE_GRACE_MS;
+
   const server = http.createServer((req, res) => {
     res.writeHead(426, { 'Content-Type': 'text/plain' });
     res.end('WebSocket connections only');
@@ -48,7 +61,16 @@ function startInboundServer(emitter, config) {
     },
   });
 
+  keepAlive(wss, config.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS);
+
   let activeInboundSocket = null;
+  let clearStateTimer = null;
+
+  function clearState() {
+    clearTimeout(clearStateTimer);
+    clearStateTimer = null;
+    emitter.emit('event', { type: MSG.INBOUND_EVENT, payload: null });
+  }
 
   function detachInboundSocket(socket) {
     if (activeInboundSocket === socket) {
@@ -65,6 +87,8 @@ function startInboundServer(emitter, config) {
     }
 
     activeInboundSocket = newSocket;
+    clearTimeout(clearStateTimer);
+    clearStateTimer = null;
     emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'connected' });
   }
 
@@ -87,12 +111,20 @@ function startInboundServer(emitter, config) {
       }
     });
 
-    clientWs.on('close', () => {
-      if (activeInboundSocket === clientWs) {
-        emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
-      }
+    clientWs.on('close', (code, reasonBuffer) => {
+      const reason = reasonBuffer.toString();
+      console.log(`[Inbound] Client disconnected (${code}${reason ? `: ${reason}` : ''})`);
+
+      if (activeInboundSocket !== clientWs) return;
       detachInboundSocket(clientWs);
-      console.log('[Inbound] Client disconnected');
+      emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
+
+      if (code === BROADCAST_DISABLED.code && reason === BROADCAST_DISABLED.reason) {
+        clearState();
+      } else {
+        clearTimeout(clearStateTimer);
+        clearStateTimer = setTimeout(clearState, stateGraceMs).unref();
+      }
     });
 
     // 'close' always follows 'error', so disconnection is handled there.
@@ -105,7 +137,9 @@ function startInboundServer(emitter, config) {
     console.log(`[Inbound] Event source listening on port ${server.address().port}`);
   });
 
+  wss.on('close', () => clearTimeout(clearStateTimer));
+
   return { server, wss };
 }
 
-module.exports = { startInboundServer };
+module.exports = { startInboundServer, BROADCAST_DISABLED };

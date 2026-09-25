@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CCD Lyrics Relay</title>
   <style>
     /* -----------------------------------------------------------------------
@@ -21,12 +21,7 @@
       background: #000;
       color: #fff;
 
-      /*
-       * Using a system serif stack here gives us a clean, readable face
-       * that's guaranteed to be available with no network request.
-       * The slightly condensed character of Georgia / serif handles
-       * long lines better than a wide sans-serif.
-       */
+      /* System fonts only, so nothing has to load over the network. */
       font-family: Arial, Helvetica, sans-serif;
       font-weight: bold;
     }
@@ -54,6 +49,7 @@
       flex-direction: column;
       align-items: center;
       gap: 0.25em;            /* relative gap — scales with font size */
+      transition: opacity 0.4s ease;
     }
 
     .line {
@@ -104,7 +100,9 @@
       opacity: 0;
     }
 
+    /* Connection dots are only shown with ?debug in the URL */
     #connection-status, #inbound_connection-status {
+      display: none;
       position: fixed;
       top: 2vh;
       width: 6px;
@@ -118,6 +116,10 @@
 
     #inbound_connection-status {
       left: 2vh;
+    }
+
+    body.debug #connection-status, body.debug #inbound_connection-status {
+      display: block;
     }
 
     #connection-status.disconnected, #inbound_connection-status.disconnected {
@@ -139,22 +141,46 @@
       display: none;
     }
 
-    #lyrics {
-      transition: opacity 0.4s ease;
+    /* Keep Scripture text clear of the reference bar at the bottom */
+    body.scripture #stage {
+      padding-bottom: 18vh;
     }
+
+    /* -----------------------------------------------------------------------
+       Waiting message — shown when no service is being broadcast
+    ----------------------------------------------------------------------- */
+    #waiting {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80%;
+      text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: normal;
+      font-size: clamp(16px, 3vw, 28px);
+      color: rgba(255, 255, 255, 0.4);
+      transition: opacity 0.5s ease;
+    }
+
+    #waiting.hidden {
+      opacity: 0;
+    }
+
     /* Scripture reference shown at bottom of the page */
     #reference-bar {
-    position: fixed;
-    bottom: 13vh;
-    width: 80%;
-    border-top: 3px solid white;
+      position: fixed;
+      bottom: 13vh;
+      width: 80%;
+      border-top: 3px solid white;
     }
     #reference {
       position: fixed;
       bottom: 6vh; /* above the status element */
       left: 50%;
       transform: translateX(-50%);
-      font-size: 3em;
+      font-size: clamp(18px, 6vw, 48px);
+      white-space: nowrap;
       color: rgba(255, 255, 255, 0.9);
       pointer-events: none;
       text-align: center;
@@ -180,6 +206,8 @@
     <div id="reference" class="hidden"></div>
   </div>
 
+  <div id="waiting" class="hidden">Lyrics will appear when the service starts</div>
+
   <div id="status">Connecting…</div>
 
   <script>
@@ -193,6 +221,10 @@
     const inboundConnectionStatusEl = document.getElementById('inbound_connection-status');
     const referenceEl = document.getElementById('reference');
     const referenceBarEl = document.getElementById('reference-bar');
+    const waitingEl = document.getElementById('waiting');
+
+    // Add ?debug to the URL to show the connection status dots.
+    document.body.classList.toggle('debug', new URLSearchParams(location.search).has('debug'));
 
     // -------------------------------------------------------------------------
     // Font sizing
@@ -268,53 +300,76 @@
     }
 
     /**
+     * Find the largest font size (px) at which the lines, wrapped, fit within
+     * `maxHeight`. Renders into the live container to measure the real
+     * wrapped height, so call it before filling the container for display.
+     */
+    function fitWrappedFontSize(lines, maxHeight, minSize) {
+      let lo = minSize;
+      let hi = 200;
+
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi + 1) / 2);
+        fillLines(lines, mid, true);
+
+        if (lyricsEl.scrollHeight <= maxHeight) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      return lo;
+    }
+
+    function fillLines(lines, sizePx, wrap) {
+      lyricsEl.innerHTML = '';
+      lines.forEach(text => {
+        const div = document.createElement('div');
+        div.className = wrap ? 'line wrap' : 'line';
+        div.style.fontSize = sizePx + 'px';
+        div.textContent = text;
+        lyricsEl.appendChild(div);
+      });
+    }
+
+    /**
      * Re-render the current lines at the optimal font size.
      * Called whenever the slide changes OR the window is resized.
+     *
+     * opts.wrap    — allow lines to wrap (Scripture) and fit by height instead
+     * opts.minSize — smallest font size to use when wrapping
      */
     let currentLines = [];
+    let currentOpts = {};
 
     function renderLines(lines, opts = {}) {
       const { wrap = false, minSize = 8 } = opts;
       currentLines = lines;
+      currentOpts = opts;
 
-      // Clear previous content
-      lyricsEl.innerHTML = '';
-
-      if (!lines.length) return;
-
-      // Available space — stage padding is 4vw on each side
-      const paddingPx = stageEl.offsetWidth * 0.04;
-      const maxWidth  = stageEl.offsetWidth  - paddingPx * 2;
-      const maxHeight = stageEl.offsetHeight - paddingPx * 2;
-
-      let size;
-
-      if (wrap) {
-        // When wrapping is allowed (Scripture), compute size based on height
-        // so lines can wrap naturally. Use a minimum font size.
-        // const lineCount = Math.max(1, lines.length);
-        // const heightFactor = lineCount * 1.15 + Math.max(0, lineCount - 1) * 0.25;
-        // size = Math.floor(maxHeight / heightFactor);
-        // size = Math.max(minSize, size);
-        size = 40; // fixed size for scripture
-      } else {
-        size = fitFontSize(lines, maxWidth, maxHeight, lines.length);
+      if (!lines.length) {
+        lyricsEl.innerHTML = '';
+        return;
       }
 
-      lines.forEach(text => {
-        const div = document.createElement('div');
-        div.className = wrap ? 'line wrap' : 'line';
-        div.style.fontSize = size + 'px';
-        div.textContent = text;
-        lyricsEl.appendChild(div);
-      });
+      // Available space inside the stage padding
+      const style = getComputedStyle(stageEl);
+      const maxWidth  = stageEl.clientWidth  - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const maxHeight = stageEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+
+      if (wrap) {
+        fillLines(lines, fitWrappedFontSize(lines, maxHeight, minSize), true);
+      } else {
+        fillLines(lines, fitFontSize(lines, maxWidth, maxHeight, lines.length), false);
+      }
     }
 
     // Re-fit on window resize (e.g. phone rotated, browser resized)
     let resizeTimer;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => renderLines(currentLines), 80);
+      resizeTimer = setTimeout(() => renderLines(currentLines, currentOpts), 80);
     });
 
     // -------------------------------------------------------------------------
@@ -372,7 +427,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // Message handlers — one per message type from lyricsServer.js
+    // Message handlers — one per message type from display-server.js
     // -------------------------------------------------------------------------
     const handlers = {
       inbound_connection_status(msg) {
@@ -387,8 +442,14 @@
        */
       inbound_event(eventJson) {
         const msg = eventJson.payload;
-        // The relay caches an empty payload until the first state arrives.
-        if (!msg || msg.type !== 'state') return;
+
+        // No payload: nothing is being broadcast (not started yet, or the
+        // bridge has been gone longer than the relay's grace period).
+        if (!msg) {
+          showWaiting();
+          return;
+        }
+        if (msg.type !== 'state') return;
         if (msg.version !== 2) {
           console.warn('Unsupported state payload version:', msg.version);
           return;
@@ -396,9 +457,16 @@
 
         const isScripture = msg.look === 'Scripture';
 
+        // Look (cleared vs song/scripture); leave as-is until a look is known.
+        // Applied before rendering so text is measured while visible.
+        if (msg.look) {
+          document.body.classList.toggle('cleared', msg.look !== 'Song' && msg.look !== 'Scripture');
+        }
+
         // Slide content (lyrics / clear). For Scripture, first line is the
         // reference shown at the bottom; remaining lines are rendered as body.
         const lines = msg.slide?.lines ?? [];
+        document.body.classList.toggle('scripture', isScripture && lines.length > 0);
         if (isScripture && lines.length) {
           referenceEl.textContent = lines[0];
           referenceEl.classList.remove('hidden');
@@ -411,14 +479,10 @@
           renderLines(lines);
         }
         hideStatus();
+        waitingEl.classList.add('hidden');
 
         // Audience screens (null = not yet known)
         document.body.classList.toggle('blanked', msg.audienceScreensEnabled === false);
-
-        // Look (cleared vs song/scripture); leave as-is until a look is known
-        if (msg.look) {
-          document.body.classList.toggle('cleared', msg.look !== 'Song' && msg.look !== 'Scripture');
-        }
 
         // Presentation / song metadata (logged for now)
         if (msg.presentation) {
@@ -428,13 +492,18 @@
         // ProPresenter connection status
         connectionStatusEl.classList.remove('connected', 'disconnected');
         connectionStatusEl.classList.add(msg.proPresenterConnected ? 'connected' : 'disconnected');
-
-        if (msg.inboundConnectionStatus) {
-          inboundConnectionStatusEl.classList.remove('connected', 'disconnected');
-          inboundConnectionStatusEl.classList.add(msg.inboundConnectionStatus.status);
-        }
       }
     };
+
+    function showWaiting() {
+      renderLines([]);
+      referenceEl.textContent = '';
+      referenceEl.classList.add('hidden');
+      referenceBarEl.classList.add('hidden');
+      document.body.classList.remove('blanked', 'cleared', 'scripture');
+      connectionStatusEl.classList.remove('connected', 'disconnected');
+      waitingEl.classList.remove('hidden');
+    }
 
     function handleMessage(msg) {
       const handler = handlers[msg.type];

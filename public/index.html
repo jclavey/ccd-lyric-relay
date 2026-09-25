@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CCD Lyrics Relay</title>
   <style>
     /* -----------------------------------------------------------------------
@@ -21,12 +21,7 @@
       background: #000;
       color: #fff;
 
-      /*
-       * Using a system serif stack here gives us a clean, readable face
-       * that's guaranteed to be available with no network request.
-       * The slightly condensed character of Georgia / serif handles
-       * long lines better than a wide sans-serif.
-       */
+      /* System fonts only, so nothing has to load over the network. */
       font-family: Arial, Helvetica, sans-serif;
       font-weight: bold;
     }
@@ -54,6 +49,7 @@
       flex-direction: column;
       align-items: center;
       gap: 0.25em;            /* relative gap — scales with font size */
+      transition: opacity 0.4s ease;
     }
 
     .line {
@@ -72,6 +68,13 @@
        * doesn't feel like a hard jump.
        */
       transition: font-size 0.15s ease;
+    }
+
+    /* Allow wrapping for scripture lines */
+    .line.wrap {
+      white-space: normal;
+      word-break: break-word;
+      hyphens: auto;
     }
 
     /* -----------------------------------------------------------------------
@@ -97,7 +100,9 @@
       opacity: 0;
     }
 
+    /* Connection dots are only shown with ?debug in the URL */
     #connection-status, #inbound_connection-status {
+      display: none;
       position: fixed;
       top: 2vh;
       width: 6px;
@@ -113,6 +118,10 @@
       left: 2vh;
     }
 
+    body.debug #connection-status, body.debug #inbound_connection-status {
+      display: block;
+    }
+
     #connection-status.disconnected, #inbound_connection-status.disconnected {
       background: red;
     }
@@ -124,7 +133,9 @@
     /* -----------------------------------------------------------------------
        Blanked state — when audience screens are disabled in ProPresenter
     ----------------------------------------------------------------------- */
-    body.blanked #lyrics {
+    body.blanked #lyrics,
+    body.blanked #reference,
+    body.blanked #reference-bar {
       opacity: 0;
     }
 
@@ -132,18 +143,73 @@
       display: none;
     }
 
-    #lyrics {
-      transition: opacity 0.4s ease;
+    /* Keep Scripture text clear of the reference bar at the bottom */
+    body.scripture #stage {
+      padding-bottom: 18vh;
+    }
+
+    /* -----------------------------------------------------------------------
+       Waiting message — shown when no service is being broadcast
+    ----------------------------------------------------------------------- */
+    #waiting {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80%;
+      text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: normal;
+      font-size: clamp(16px, 3vw, 28px);
+      color: rgba(255, 255, 255, 0.4);
+      transition: opacity 0.5s ease;
+    }
+
+    #waiting.hidden {
+      opacity: 0;
+    }
+
+    /* Scripture reference shown at bottom of the page */
+    #reference-bar {
+      position: fixed;
+      bottom: 13vh;
+      width: 80%;
+      border-top: 3px solid white;
+      transition: opacity 0.2s ease;
+    }
+    #reference {
+      position: fixed;
+      bottom: 6vh; /* above the status element */
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: clamp(18px, 6vw, 48px);
+      white-space: nowrap;
+      color: rgba(255, 255, 255, 0.9);
+      pointer-events: none;
+      text-align: center;
+      transition: opacity 0.2s ease;
+    }
+
+    #reference-bar.hidden {
+      opacity: 0;
+    }
+
+    #reference.hidden {
+      opacity: 0;
     }
   </style>
 </head>
-<body>
+<body class="blanked">
 
   <div id="stage">
     <div id="connection-status"></div>
     <div id="inbound_connection-status"></div>
     <div id="lyrics"></div>
+    <div id="reference-bar" class="hidden"></div>
+    <div id="reference" class="hidden"></div>
   </div>
+
+  <div id="waiting" class="hidden">Lyrics will appear when the service starts</div>
 
   <div id="status">Connecting…</div>
 
@@ -156,6 +222,12 @@
     const stageEl  = document.getElementById('stage');
     const connectionStatusEl = document.getElementById('connection-status');
     const inboundConnectionStatusEl = document.getElementById('inbound_connection-status');
+    const referenceEl = document.getElementById('reference');
+    const referenceBarEl = document.getElementById('reference-bar');
+    const waitingEl = document.getElementById('waiting');
+
+    // Add ?debug to the URL to show the connection status dots.
+    document.body.classList.toggle('debug', new URLSearchParams(location.search).has('debug'));
 
     // -------------------------------------------------------------------------
     // Font sizing
@@ -231,40 +303,76 @@
     }
 
     /**
-     * Re-render the current lines at the optimal font size.
-     * Called whenever the slide changes OR the window is resized.
+     * Find the largest font size (px) at which the lines, wrapped, fit within
+     * `maxHeight`. Renders into the live container to measure the real
+     * wrapped height, so call it before filling the container for display.
      */
-    let currentLines = [];
+    function fitWrappedFontSize(lines, maxHeight, minSize) {
+      let lo = minSize;
+      let hi = 200;
 
-    function renderLines(lines) {
-      currentLines = lines;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi + 1) / 2);
+        fillLines(lines, mid, true);
 
-      // Clear previous content
+        if (lyricsEl.scrollHeight <= maxHeight) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      return lo;
+    }
+
+    function fillLines(lines, sizePx, wrap) {
       lyricsEl.innerHTML = '';
-
-      if (!lines.length) return;
-
-      // Available space — stage padding is 4vw on each side
-      const paddingPx = stageEl.offsetWidth * 0.04;
-      const maxWidth  = stageEl.offsetWidth  - paddingPx * 2;
-      const maxHeight = stageEl.offsetHeight - paddingPx * 2;
-
-      const size = fitFontSize(lines, maxWidth, maxHeight, lines.length);
-
       lines.forEach(text => {
         const div = document.createElement('div');
-        div.className = 'line';
-        div.style.fontSize = size + 'px';
+        div.className = wrap ? 'line wrap' : 'line';
+        div.style.fontSize = sizePx + 'px';
         div.textContent = text;
         lyricsEl.appendChild(div);
       });
+    }
+
+    /**
+     * Re-render the current lines at the optimal font size.
+     * Called whenever the slide changes OR the window is resized.
+     *
+     * opts.wrap    — allow lines to wrap (Scripture) and fit by height instead
+     * opts.minSize — smallest font size to use when wrapping
+     */
+    let currentLines = [];
+    let currentOpts = {};
+
+    function renderLines(lines, opts = {}) {
+      const { wrap = false, minSize = 8 } = opts;
+      currentLines = lines;
+      currentOpts = opts;
+
+      if (!lines.length) {
+        lyricsEl.innerHTML = '';
+        return;
+      }
+
+      // Available space inside the stage padding
+      const style = getComputedStyle(stageEl);
+      const maxWidth  = stageEl.clientWidth  - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const maxHeight = stageEl.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+
+      if (wrap) {
+        fillLines(lines, fitWrappedFontSize(lines, maxHeight, minSize), true);
+      } else {
+        fillLines(lines, fitFontSize(lines, maxWidth, maxHeight, lines.length), false);
+      }
     }
 
     // Re-fit on window resize (e.g. phone rotated, browser resized)
     let resizeTimer;
     window.addEventListener('resize', () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => renderLines(currentLines), 80);
+      resizeTimer = setTimeout(() => renderLines(currentLines, currentOpts), 80);
     });
 
     // -------------------------------------------------------------------------
@@ -322,75 +430,86 @@
     }
 
     // -------------------------------------------------------------------------
-    // Message handlers — one per message type from lyricsServer.js
+    // Message handlers — one per message type from display-server.js
     // -------------------------------------------------------------------------
     const handlers = {
-      /**
-       * hello — initial greeting from the server before any slide has fired.
-       * Nothing to render; just keep the status visible.
-       */
-      hello(msg) {
-        setStatus('Waiting for first slide…');
-      },
-
-      /**
-       * lyrics — a slide with text content.
-       * Render the lines as large as they'll fit.
-       */
-      lyrics(msg) {
-        renderLines(msg.lines ?? []);
-        hideStatus();
-      },
-
-      /**
-       * clear — a blank slide (e.g. between songs, or a media-only slide).
-       * Empty the display.
-       */
-      clear(msg) {
-        renderLines([]);
-        hideStatus();
-      },
-
-      look(msg) {
-        if (msg.name === 'Song') {
-          document.body.classList.remove('cleared');
-        } else {
-          document.body.classList.add('cleared');
-        }
-      },
-
-      /**
-       * presentation — the active song/presentation changed.
-       * We receive this but don't display it on the lyrics page;
-       * it's available here if you want to add a song-title overlay.
-       */
-      presentation(msg) {
-        // Optional: document.title = msg.name ?? 'Lyrics';
-        console.log('Presentation:', msg.name);
-      },
-
-      /**
-       * audience_screens — operator enabled/disabled output in ProPresenter.
-       * When disabled, fade out the lyrics so the display is blank.
-       */
-      audience_screens(msg) {
-        if (msg.enabled === false) {
-          document.body.classList.add('blanked');
-        } else {
-          document.body.classList.remove('blanked');
-        }
-      },
-
-      connection_status(msg) {
-        connectionStatusEl.classList.remove('connected', 'disconnected');
-        connectionStatusEl.classList.add(msg.status);
-      },
-
       inbound_connection_status(msg) {
         inboundConnectionStatusEl.classList.remove('connected', 'disconnected');
         inboundConnectionStatusEl.classList.add(msg.status);
+      },
+      /**
+       * inbound_event — wraps the v2 `state` payload from
+       * ccd-propresenter-bridge:
+       *   { type, version, timestamp, look, presentation, slide: { lines },
+       *     audienceScreensEnabled, proPresenterConnected }
+       */
+      inbound_event(eventJson) {
+        const msg = eventJson.payload;
+
+        // No payload: nothing is being broadcast (not started yet, or the
+        // bridge has been gone longer than the relay's grace period).
+        if (!msg) {
+          showWaiting();
+          return;
+        }
+        if (msg.type !== 'state') return;
+        if (msg.version !== 2) {
+          console.warn('Unsupported state payload version:', msg.version);
+          return;
+        }
+
+        const isScripture = msg.look === 'Scripture';
+
+        // Audience screens (null = not yet known). Applied before rendering;
+        // the page starts blanked so a first slide with screens off never
+        // fades out from full opacity.
+        document.body.classList.toggle('blanked', msg.audienceScreensEnabled === false);
+
+        // Look (cleared vs song/scripture); leave as-is until a look is known.
+        // Applied before rendering so text is measured while visible.
+        if (msg.look) {
+          document.body.classList.toggle('cleared', msg.look !== 'Song' && msg.look !== 'Scripture');
+        }
+
+        // Slide content (lyrics / clear). For Scripture, first line is the
+        // reference shown at the bottom; remaining lines are rendered as body.
+        const lines = msg.slide?.lines ?? [];
+        document.body.classList.toggle('scripture', isScripture && lines.length > 0);
+        if (isScripture && lines.length) {
+          referenceEl.textContent = lines[0];
+          referenceEl.classList.remove('hidden');
+          referenceBarEl.classList.remove('hidden');
+          renderLines(lines.slice(1), { wrap: true, minSize: 20 });
+        } else {
+          referenceEl.textContent = '';
+          referenceEl.classList.add('hidden');
+          referenceBarEl.classList.add('hidden');
+          renderLines(lines);
+        }
+        hideStatus();
+        waitingEl.classList.add('hidden');
+
+        // Presentation / song metadata (logged for now)
+        if (msg.presentation) {
+          console.log('Presentation:', msg.presentation.name);
+        }
+
+        // ProPresenter connection status
+        connectionStatusEl.classList.remove('connected', 'disconnected');
+        connectionStatusEl.classList.add(msg.proPresenterConnected ? 'connected' : 'disconnected');
       }
     };
+
+    function showWaiting() {
+      renderLines([]);
+      referenceEl.textContent = '';
+      referenceEl.classList.add('hidden');
+      referenceBarEl.classList.add('hidden');
+      document.body.classList.remove('cleared', 'scripture');
+      document.body.classList.add('blanked');
+      connectionStatusEl.classList.remove('connected', 'disconnected');
+      waitingEl.classList.remove('hidden');
+    }
 
     function handleMessage(msg) {
       const handler = handlers[msg.type];

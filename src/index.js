@@ -1,18 +1,18 @@
 /**
  * index.js
  *
- * Simple Express web server that serves the lyrics display page.
- * The page itself connects directly to the lyrics WebSocket server
- * from the browser — this server's only job is to deliver the HTML/JS.
+ * Starts the two halves of the relay, joined by a shared EventEmitter:
  *
- * The WebSocket host/port are injected into the HTML at serve time so
- * the browser knows where to connect without needing any build step.
+ *   ccd-propresenter-bridge ──ws──▶ inbound-server (EVENT_SOURCE_PORT)
+ *                                        │ 'event'
+ *                                        ▼
+ *                 browsers ◀──ws── display-server (DISPLAY_SERVER_PORT)
  */
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const { EventEmitter } = require('events');
 const { startInboundServer } = require('./inbound-server');
-const { startLyricsServer } = require('./lyrics-server');
+const { startDisplayServer } = require('./display-server');
 
 const EVENT_SOURCE_PORT = parseInt(process.env.EVENT_SOURCE_PORT || '3000', 10);
 const DISPLAY_SERVER_PORT = parseInt(process.env.DISPLAY_SERVER_PORT || '8080', 10);
@@ -22,4 +22,4 @@ const INBOUND_API_TOKEN = process.env.INBOUND_API_TOKEN || process.env.API_TOKEN
 const emitter = new EventEmitter();
 
 startInboundServer(emitter, { port: EVENT_SOURCE_PORT, apiToken: INBOUND_API_TOKEN });
-startLyricsServer(emitter, { port: DISPLAY_SERVER_PORT });
+startDisplayServer(emitter, { port: DISPLAY_SERVER_PORT });

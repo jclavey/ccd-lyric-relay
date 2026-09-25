@@ -1,7 +1,7 @@
 {
   "name": "ccd-lyric-relay",
   "version": "0.0.2",
-  "description": "Web server that accepts events via Websocket and provides a page for the lyrics",
+  "description": "Receives ProPresenter state from ccd-propresenter-bridge and serves the lyrics display page",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -12,7 +12,6 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
-    "http": "^0.0.1-security",
     "ws": "^8.21.0"
   }
 }

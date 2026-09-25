@@ -1,11 +1,25 @@
-const express = require('express');
+/**
+ * inbound-server.js
+ *
+ * Accepts the WebSocket connection from ccd-propresenter-bridge (token
+ * required) and re-emits each JSON message as an 'event' for the display
+ * server. Only one bridge connection is active at a time; a newer one
+ * replaces the old.
+ */
+
 const WebSocket = require('ws');
 const http = require('http');
-const { MSG } = require('./lyrics-server');
+const { MSG } = require('./display-server');
 
+/**
+ * @param {import('events').EventEmitter} emitter
+ * @param {{ port: number, apiToken?: string }} config
+ */
 function startInboundServer(emitter, config) {
-  const app = express();
-  const server = http.createServer(app);
+  const server = http.createServer((req, res) => {
+    res.writeHead(426, { 'Content-Type': 'text/plain' });
+    res.end('WebSocket connections only');
+  });
   const apiToken = config.apiToken;
   const wss = new WebSocket.Server({
     server,
@@ -74,24 +88,21 @@ function startInboundServer(emitter, config) {
     });
 
     clientWs.on('close', () => {
-      if (activeInboundSocket == clientWs) {
+      if (activeInboundSocket === clientWs) {
         emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
       }
       detachInboundSocket(clientWs);
       console.log('[Inbound] Client disconnected');
     });
 
+    // 'close' always follows 'error', so disconnection is handled there.
     clientWs.on('error', (error) => {
-      console.error('[Inbound] Client socket error', error);
-      if (activeInboundSocket == clientWs) {
-        emitter.emit('event', { type: MSG.INBOUND_CONNECTION_STATUS, status: 'disconnected' });
-      }
-      detachInboundSocket(clientWs);
+      console.error('[Inbound] Client socket error:', error.message);
     });
   });
 
   server.listen(config.port, () => {
-    console.log(`[Inbound] Event source listening on port ${config.port}`);
+    console.log(`[Inbound] Event source listening on port ${server.address().port}`);
   });
 
   return { server, wss };

@@ -380,57 +380,44 @@
         inboundConnectionStatusEl.classList.add(msg.status);
       },
       /**
-       * state — combined event containing slide, view, presentation,
-       * screens, look, and connectionStatus.
+       * inbound_event — wraps the v2 `state` payload from
+       * propresenter-lyrics-server:
+       *   { type, version, timestamp, look, presentation, slide: { lines },
+       *     audienceScreensEnabled, proPresenterConnected }
        */
       inbound_event(eventJson) {
         const msg = eventJson.payload;
+        // The relay caches an empty payload until the first state arrives.
+        if (!msg || msg.type !== 'state') return;
+        if (msg.version !== 2) {
+          console.warn('Unsupported state payload version:', msg.version);
+          return;
+        }
 
-        const isScripture = (msg.look && msg.look.name === 'Scripture') || (msg.view && msg.view.lookName === 'Scripture');
+        const isScripture = msg.look === 'Scripture';
 
         // Slide content (lyrics / clear). For Scripture, first line is the
         // reference shown at the bottom; remaining lines are rendered as body.
-        if (msg.slide) {
-          const lines = msg.slide.lines ?? [];
-          if (isScripture && lines.length) {
-            const reference = lines[0];
-            const bodyLines = lines.slice(1);
-            referenceEl.textContent = reference;
-            referenceEl.classList.remove('hidden');
-            referenceBarEl.classList.remove('hidden');
-            renderLines(bodyLines, { wrap: true, minSize: 20 });
-            hideStatus();
-          } else if (lines.length) {
-            referenceEl.textContent = '';
-            referenceEl.classList.add('hidden');
-            referenceBarEl.classList.add('hidden');
-            renderLines(lines);
-            hideStatus();
-          } else {
-            referenceEl.textContent = '';
-            referenceEl.classList.add('hidden');
-            referenceBarEl.classList.add('hidden');
-            renderLines([]);
-            hideStatus();
-          }
+        const lines = msg.slide?.lines ?? [];
+        if (isScripture && lines.length) {
+          referenceEl.textContent = lines[0];
+          referenceEl.classList.remove('hidden');
+          referenceBarEl.classList.remove('hidden');
+          renderLines(lines.slice(1), { wrap: true, minSize: 20 });
+        } else {
+          referenceEl.textContent = '';
+          referenceEl.classList.add('hidden');
+          referenceBarEl.classList.add('hidden');
+          renderLines(lines);
         }
+        hideStatus();
 
-        // Audience screens
-        if (msg.screens) {
-          if (msg.screens.enabled === false) {
-            document.body.classList.add('blanked');
-          } else {
-            document.body.classList.remove('blanked');
-          }
-        }
+        // Audience screens (null = not yet known)
+        document.body.classList.toggle('blanked', msg.audienceScreensEnabled === false);
 
-        // Look (cleared vs song/scripture)
+        // Look (cleared vs song/scripture); leave as-is until a look is known
         if (msg.look) {
-          if (msg.look.name === 'Song' || msg.look.name === 'Scripture') {
-            document.body.classList.remove('cleared');
-          } else {
-            document.body.classList.add('cleared');
-          }
+          document.body.classList.toggle('cleared', msg.look !== 'Song' && msg.look !== 'Scripture');
         }
 
         // Presentation / song metadata (logged for now)
@@ -438,20 +425,9 @@
           console.log('Presentation:', msg.presentation.name);
         }
 
-        // View may also contain presentationName and lookName
-        if (msg.view) {
-          if (msg.view.presentationName) console.log('Presentation:', msg.view.presentationName);
-          if (msg.view.lookName) {
-            if (msg.view.lookName === 'Song' || msg.view.lookName === 'Scripture') document.body.classList.remove('cleared');
-            else document.body.classList.add('cleared');
-          }
-        }
-
-        // Connection statuses
-        if (msg.connectionStatus) {
-          connectionStatusEl.classList.remove('connected', 'disconnected');
-          connectionStatusEl.classList.add(msg.connectionStatus.status);
-        }
+        // ProPresenter connection status
+        connectionStatusEl.classList.remove('connected', 'disconnected');
+        connectionStatusEl.classList.add(msg.proPresenterConnected ? 'connected' : 'disconnected');
 
         if (msg.inboundConnectionStatus) {
           inboundConnectionStatusEl.classList.remove('connected', 'disconnected');

@@ -77,6 +77,13 @@
       hyphens: auto;
     }
 
+    /* Verse numbers in Scripture text */
+    .line sup {
+      font-size: 0.55em;
+      line-height: 0;         /* don't let the superscript push lines apart */
+      margin-right: 0.1em;
+    }
+
     /* -----------------------------------------------------------------------
        Status overlay — shown when disconnected or waiting for content
     ----------------------------------------------------------------------- */
@@ -325,13 +332,38 @@
       return lo;
     }
 
+    /**
+     * Scripture text carries inline verse numbers. A run of digits is a verse
+     * number (superscripted) unless it has whitespace on both sides, in which
+     * case it's ordinary text (e.g. "after 40 days").
+     */
+    function appendWithVerseNumbers(el, text) {
+      let last = 0;
+      for (const m of text.matchAll(/\d+/g)) {
+        const before = text[m.index - 1];
+        const after = text[m.index + m[0].length];
+        if (/\s/.test(before ?? '') && /\s/.test(after ?? '')) continue;
+
+        el.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const sup = document.createElement('sup');
+        sup.textContent = m[0];
+        el.appendChild(sup);
+        last = m.index + m[0].length;
+      }
+      el.appendChild(document.createTextNode(text.slice(last)));
+    }
+
     function fillLines(lines, sizePx, wrap) {
       lyricsEl.innerHTML = '';
       lines.forEach(text => {
         const div = document.createElement('div');
         div.className = wrap ? 'line wrap' : 'line';
         div.style.fontSize = sizePx + 'px';
-        div.textContent = text;
+        if (wrap) {
+          appendWithVerseNumbers(div, text);
+        } else {
+          div.textContent = text;
+        }
         lyricsEl.appendChild(div);
       });
     }

@@ -100,6 +100,40 @@ commit `.env`.
 The `state` payload format is documented in the
 [bridge README](https://github.com/jclavey/ccd-propresenter-bridge#relay-payload-v2).
 
+## Testing without ProPresenter (mock bridge)
+
+`scripts/mock-bridge.js` stands in for `ccd-propresenter-bridge`, so you can
+test the display without running ProPresenter or the bridge. It connects to the
+relay's inbound port like the real bridge (token header, 15s heartbeat) and
+pages through sample slides, sending the v2 `state` payload each time.
+
+```bash
+npm start                                  # terminal 1: the relay
+npm run mock                               # terminal 2: alternate song and scripture
+```
+
+Then open `http://localhost:8080` (add `?debug` to see the status dots).
+
+| Option | Default | Purpose |
+|---|---|---|
+| `song` / `scripture` / `both` | `both` | Which sample slides to send |
+| `--interval <ms>` | `1000` | Time between slides |
+| `--url <ws url>` | `ws://localhost:$EVENT_SOURCE_PORT` | Relay to connect to, e.g. a dev deployment (`wss://...`) |
+| `--token <token>` | `INBOUND_API_TOKEN` from `.env` | Token to send |
+| `--once` | off | Stop after one pass instead of looping |
+
+```bash
+npm run mock -- song                       # song only
+npm run mock -- scripture --interval 2000  # scripture, 2s per slide
+```
+
+Press Ctrl+C to stop. Like the real bridge, the mock closes with
+`1000 "broadcast disabled"`, so the relay clears the display immediately.
+
+The sample slides are in `scripts/mock-bridge-data.js`. For scripture, the
+first line is the reference. Add or edit slides there to reproduce a layout
+you want to check.
+
 ## Tests
 
 ```bash

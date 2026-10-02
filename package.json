@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "mock": "node scripts/mock-bridge.js"
   },
   "license": "MIT",
   "dependencies": {

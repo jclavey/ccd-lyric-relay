@@ -553,8 +553,32 @@
     }
 
     // -------------------------------------------------------------------------
+    // Keep the screen awake (Screen Wake Lock API; needs HTTPS or localhost)
+    // -------------------------------------------------------------------------
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      if (!('wakeLock' in navigator) || wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        // The browser releases the lock when the page is hidden
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch (err) {
+        console.warn('Wake lock unavailable:', err.message);
+      }
+    }
+
+    // Re-acquire after returning to the tab / unlocking the phone
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') requestWakeLock();
+    });
+    // Some browsers only grant the lock after a user gesture
+    document.addEventListener('click', requestWakeLock);
+
+    // -------------------------------------------------------------------------
     // Start
     // -------------------------------------------------------------------------
+    requestWakeLock();
     connect();
   </script>
 </body>

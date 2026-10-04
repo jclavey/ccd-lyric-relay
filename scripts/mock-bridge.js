@@ -4,9 +4,11 @@
  *
  * Stands in for ccd-propresenter-bridge so the relay can be tested without
  * running ProPresenter. Connects to the relay's inbound port and pages through
- * sample slides, sending the v2 `state` payload each time.
+ * sample slides, sending the v2 `state` payload each time. The `presentation`
+ * look also sends a `thumbnail` message per slide (fake advert images), and a
+ * `thumbnail_clear` when the look moves on, as the real bridge does.
  *
- *   node scripts/mock-bridge.js [song|scripture|both] [--interval 1000]
+ *   node scripts/mock-bridge.js [song|scripture|both|presentation|all] [--interval 1000]
  *        [--url ws://localhost:3000] [--token xxx] [--once]
  *
  * Defaults: mode `both`, 1s interval, URL/token from .env (EVENT_SOURCE_PORT,
@@ -16,10 +18,16 @@
 
 require('dotenv').config({ quiet: true });
 const WebSocket = require('ws');
-const { SONG, SCRIPTURE } = require('./mock-bridge-data');
+const { SONG, SCRIPTURE, PRESENTATION } = require('./mock-bridge-data');
 
 const HEARTBEAT_MS = 15000;
-const MODES = { song: [SONG], scripture: [SCRIPTURE], both: [SONG, SCRIPTURE] };
+const MODES = {
+  song: [SONG],
+  scripture: [SCRIPTURE],
+  both: [SONG, SCRIPTURE],
+  presentation: [PRESENTATION],
+  all: [SONG, PRESENTATION, SCRIPTURE, PRESENTATION],
+};
 
 function parseArgs(argv) {
   const opts = { mode: 'both', once: false };
@@ -45,7 +53,13 @@ const token = opts.token || process.env.INBOUND_API_TOKEN || process.env.API_TOK
 
 // Flatten the chosen sets into one ordered list of states.
 const steps = MODES[opts.mode].flatMap((set) =>
-  set.slides.map((lines) => ({ look: set.look, presentation: set.presentation, lines })),
+  set.slides.map((lines, i) => ({
+    look: set.look,
+    presentation: set.presentation,
+    lines,
+    thumbnail: set.thumbnails?.[i],
+    index: i,
+  })),
 );
 
 let index = 0;
@@ -73,10 +87,31 @@ function send() {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload()));
 }
 
+let thumbnailShown = false;
+
+function sendThumbnail() {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  if (current.thumbnail) {
+    ws.send(JSON.stringify({
+      type: 'thumbnail',
+      timestamp: Date.now(),
+      presentationUuid: current.presentation.uuid,
+      index: current.index,
+      ...current.thumbnail,
+    }));
+    thumbnailShown = true;
+  } else if (thumbnailShown) {
+    ws.send(JSON.stringify({ type: 'thumbnail_clear', timestamp: Date.now() }));
+    thumbnailShown = false;
+  }
+}
+
 function showStep() {
   current = steps[index];
-  console.log(`[Mock] ${index + 1}/${steps.length} ${current.look}: ${current.lines.join(' / ').slice(0, 70)}`);
+  const label = current.thumbnail ? `[image ${current.index + 1}]` : current.lines.join(' / ').slice(0, 70);
+  console.log(`[Mock] ${index + 1}/${steps.length} ${current.look}: ${label}`);
   send();
+  sendThumbnail();
 }
 
 function shutdown() {

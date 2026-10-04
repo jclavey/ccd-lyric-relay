@@ -124,6 +124,30 @@ test('forwards bridge messages as inbound events', async (t) => {
   bridge.close();
 });
 
+test('forwards thumbnail messages as their own event types, not wrapped as state', async (t) => {
+  const { server, events } = await startWithEvents(t, {});
+
+  const bridge = await connectBridge(server);
+  const thumbnail = { type: 'thumbnail', timestamp: 5, index: 1, mime: 'image/jpeg', data: 'AAAA' };
+  const clear = { type: 'thumbnail_clear', timestamp: 6 };
+  bridge.send(JSON.stringify(thumbnail));
+  bridge.send(JSON.stringify(clear));
+
+  await sleep(100);
+  assert.deepEqual(events.filter((event) => event.type !== 'inbound_connection_status'), [thumbnail, clear]);
+  bridge.close();
+});
+
+test('clearing state also clears the thumbnail (without a timestamp)', async (t) => {
+  const { server, events } = await startWithEvents(t, {});
+
+  const bridge = await connectBridge(server);
+  bridge.close(1000, 'broadcast disabled');
+
+  await sleep(100);
+  assert.deepEqual(events.filter((event) => event.type === 'thumbnail_clear'), [{ type: 'thumbnail_clear' }]);
+});
+
 test('drops a bridge connection that stops answering pings', async (t) => {
   const { server, events } = await startWithEvents(t, { pingIntervalMs: 50, stateGraceMs: 60000 });
 

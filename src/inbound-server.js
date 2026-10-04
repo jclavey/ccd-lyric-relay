@@ -70,6 +70,8 @@ function startInboundServer(emitter, config) {
     clearTimeout(clearStateTimer);
     clearStateTimer = null;
     emitter.emit('event', { type: MSG.INBOUND_EVENT, payload: null });
+    // No timestamp: a relay-side clear isn't ordered against the bridge's.
+    emitter.emit('event', { type: MSG.THUMBNAIL_CLEAR });
   }
 
   function detachInboundSocket(socket) {
@@ -105,7 +107,12 @@ function startInboundServer(emitter, config) {
 
       try {
         const json = JSON.parse(data);
-        emitter.emit('event', { type: MSG.INBOUND_EVENT, payload: json });
+        if (json?.type === MSG.THUMBNAIL || json?.type === MSG.THUMBNAIL_CLEAR) {
+          // Cached and replayed separately from the state.
+          emitter.emit('event', json);
+        } else {
+          emitter.emit('event', { type: MSG.INBOUND_EVENT, payload: json });
+        }
       } catch (err) {
         console.error('[Inbound] Failed to parse message as JSON:', err.message);
       }

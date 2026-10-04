@@ -95,7 +95,16 @@ commit `.env`.
 | `type` | Fields | Meaning |
 |---|---|---|
 | `inbound_event` | `payload`: the bridge's v2 `state` payload, or `null` | Current state; `null` means nothing is being broadcast |
+| `thumbnail` | `timestamp`, `presentationUuid`, `index`, `mime`, `data` (base64) | Image of the current slide for non-lyric looks (e.g. `Presentation`); the page shows it full-screen |
+| `thumbnail_clear` | `timestamp` (optional) | Hide the image |
 | `inbound_connection_status` | `status`: `connected` / `disconnected` | Whether the bridge is connected to the relay |
+
+Thumbnails are cached separately from the state, so heartbeats don't evict
+them and a newly connected browser gets both. `timestamp` only orders
+thumbnail messages against each other (older ones are dropped, so stepping
+backwards through slides works). The relay sends a `thumbnail_clear` without a
+timestamp when it clears state (broadcast off, or grace period expired), which
+also resets the ordering.
 
 The `state` payload format is documented in the
 [bridge README](https://github.com/jclavey/ccd-propresenter-bridge#relay-payload-v2).
@@ -105,7 +114,7 @@ The `state` payload format is documented in the
 `scripts/mock-bridge.js` stands in for `ccd-propresenter-bridge`, so you can
 test the display without running ProPresenter or the bridge. It connects to the
 relay's inbound port like the real bridge (token header, 15s heartbeat) and
-pages through sample slides, sending the v2 `state` payload each time.
+pages through sample slides, sending the v2 `state` payload each time (plus fake advert thumbnails for the `presentation` look).
 
 ```bash
 npm start                                  # terminal 1: the relay
@@ -116,7 +125,7 @@ Then open `http://localhost:8080` (add `?debug` to see the status dots).
 
 | Option | Default | Purpose |
 |---|---|---|
-| `song` / `scripture` / `both` | `both` | Which sample slides to send |
+| `song` / `scripture` / `both` / `presentation` / `all` | `both` | Which sample slides to send (`presentation` sends advert images; `all` mixes every look) |
 | `--interval <ms>` | `1000` | Time between slides |
 | `--url <ws url>` | `ws://localhost:$EVENT_SOURCE_PORT` | Relay to connect to, e.g. a dev deployment (`wss://...`) |
 | `--token <token>` | `INBOUND_API_TOKEN` from `.env` | Token to send |

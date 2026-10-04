@@ -29,4 +29,33 @@ const SCRIPTURE = {
   ],
 };
 
-module.exports = { SONG, SCRIPTURE };
+/**
+ * Fake advert slides, drawn as SVG so no image files or libraries are needed.
+ * The real bridge sends JPEGs; the relay and page don't care about the type.
+ * Deliberately a mix of aspect ratios (16:9, 4:3, portrait) to exercise
+ * contain-fitting.
+ */
+function advertSvg({ width, height, background, accent, headline, subline }) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <rect width="100%" height="100%" fill="${background}"/>
+  <rect x="${width * 0.06}" y="${height * 0.06}" width="${width * 0.88}" height="${height * 0.88}" fill="none" stroke="${accent}" stroke-width="${width * 0.006}"/>
+  <text x="50%" y="46%" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="${width * 0.09}" fill="#fff">${headline}</text>
+  <text x="50%" y="60%" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="${width * 0.04}" fill="${accent}">${subline}</text>
+</svg>`;
+}
+
+const ADVERTS = [
+  { width: 1280, height: 720, background: '#1b3a5c', accent: '#ffd166', headline: 'Alpha Course', subline: 'Starts Tuesday 7:30pm' },
+  { width: 1280, height: 720, background: '#5c1b3a', accent: '#8ee3ef', headline: 'Youth Camp', subline: 'Register at the welcome desk' },
+  { width: 960, height: 720, background: '#2d5c1b', accent: '#fff3b0', headline: 'Foodbank Drive', subline: 'Bring tins next Sunday' },
+  { width: 540, height: 960, background: '#3a1b5c', accent: '#ffb4a2', headline: 'Welcome', subline: 'Morning tea in the hall' },
+].map((spec) => ({ mime: 'image/svg+xml', data: Buffer.from(advertSvg(spec)).toString('base64') }));
+
+const PRESENTATION = {
+  look: 'Presentation',
+  presentation: { name: 'Announcements', uuid: 'mock-announcements' },
+  slides: ADVERTS.map(() => []), // no lyric lines; the image is the content
+  thumbnails: ADVERTS,
+};
+
+module.exports = { SONG, SCRIPTURE, PRESENTATION };

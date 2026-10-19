@@ -23,6 +23,9 @@ ccd-propresenter-bridge ──wss + token──▶ inbound-server  (EVENT_SOURCE
   mid-service gets the current slide immediately.
 - **`src/keep-alive.js`**: pings both sets of sockets every 30s and drops any
   that stopped answering, so dead connections are noticed.
+- **`src/status-reporter.js`**: optionally reports the number of viewers to the
+  [`ccd-bridge-status`](../ccd-bridge-status) dashboard (see
+  [Viewer count reporting](#viewer-count-reporting)).
 
 ### When the bridge goes away
 
@@ -51,10 +54,42 @@ Then open `http://localhost:8080`, and point a bridge at
 | `EVENT_SOURCE_PORT` | `3000` | Port for the bridge's WebSocket |
 | `DISPLAY_SERVER_PORT` | `8080` | Port for the display page and browser WebSocket |
 | `STATE_GRACE_MS` | `60000` | How long to keep showing the last slide after an unexpected bridge drop |
+| `STATUS_URL` | *(off)* | Base URL of the status dashboard. Viewer counts are reported only when this is set |
+| `STATUS_TOKEN` | *(none)* | Bearer token for the dashboard (its `INBOUND_API_TOKEN`). Required with `STATUS_URL` |
+| `USER_COUNT_INTERVAL_MS` | `60000` | How often the viewer count is checked |
+| `USER_COUNT_KEEPALIVE_MS` | `600000` | While anyone is connected, re-send an unchanged count this often |
 
 The bridge may send the token as an `x-api-token` header (what
 `ccd-propresenter-bridge` does), an `Authorization: Bearer` header, or a
 `?token=` query parameter.
+
+## Viewer count reporting
+
+When `STATUS_URL` and `STATUS_TOKEN` are set, the relay tells the status
+dashboard how many browsers are connected to the display page
+(`POST <STATUS_URL>/ingest/users`). Without them it does nothing and the relay
+behaves exactly as before.
+
+Most of the time nobody is watching, so it sends as little as possible:
+
+- **On start**, a count of 0, so the dashboard knows any earlier count ended
+  with the previous run.
+- **When the count changes**, checked every `USER_COUNT_INTERVAL_MS`. Someone
+  who connects and leaves within one interval is not counted. A browser that
+  dropped without closing can take up to a minute to disappear from the count
+  (see `keep-alive.js`).
+- **While the count is above 0**, the same count again every
+  `USER_COUNT_KEEPALIVE_MS`, so the dashboard can tell "still 5 viewers" from
+  "the relay died with 5". Nothing is sent while the count stays at 0.
+
+The dashboard shows a non-zero count with no update for
+`USER_COUNT_STALE_SECONDS` (default 20 minutes) as unknown, so keep that at
+twice `USER_COUNT_KEEPALIVE_MS`.
+
+It never affects the lyrics. It sends one request at a time with a 5 second
+timeout, keeps only the latest count (a failed send is not queued, the next
+check sends the count as it is then), and logs once when the dashboard becomes
+unreachable and once when it recovers.
 
 ## Deployment (Railway)
 
@@ -68,8 +103,9 @@ One Railway service with two public domains: one targets `EVENT_SOURCE_PORT`
 | prd | `main` |
 
 Work on `dev`, check it on the dev environment, then merge `dev` into `main`
-to release. Set `INBOUND_API_TOKEN` in each environment's variables. Don't
-commit `.env`.
+to release. Set `INBOUND_API_TOKEN` in each environment's variables, and
+`STATUS_URL` and `STATUS_TOKEN` to report viewer counts (use the dev dashboard
+for the dev environment). Don't commit `.env`.
 
 ## The display page
 

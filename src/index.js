@@ -7,12 +7,15 @@
  *                                        │ 'event'
  *                                        ▼
  *                 browsers ◀──ws── display-server (DISPLAY_SERVER_PORT)
+ *
+ * Optionally (STATUS_URL) reports the number of viewers to the status dashboard.
  */
 
 require('dotenv').config({ quiet: true });
 const { EventEmitter } = require('events');
 const { startInboundServer } = require('./inbound-server');
 const { startDisplayServer } = require('./display-server');
+const { startStatusReporter, countOpenClients, DEFAULT_INTERVAL_MS, DEFAULT_KEEPALIVE_MS } = require('./status-reporter');
 
 const EVENT_SOURCE_PORT = parseInt(process.env.EVENT_SOURCE_PORT || '3000', 10);
 const DISPLAY_SERVER_PORT = parseInt(process.env.DISPLAY_SERVER_PORT || '8080', 10);
@@ -24,4 +27,35 @@ const STATE_GRACE_MS = parseInt(process.env.STATE_GRACE_MS || '60000', 10);
 const emitter = new EventEmitter();
 
 startInboundServer(emitter, { port: EVENT_SOURCE_PORT, apiToken: INBOUND_API_TOKEN, stateGraceMs: STATE_GRACE_MS });
-startDisplayServer(emitter, { port: DISPLAY_SERVER_PORT });
+const display = startDisplayServer(emitter, { port: DISPLAY_SERVER_PORT });
+
+// --- Viewer count reporting (off unless STATUS_URL is set) ---
+const STATUS_URL = (process.env.STATUS_URL || '').trim();
+const STATUS_TOKEN = (process.env.STATUS_TOKEN || '').trim();
+
+if (STATUS_URL && !STATUS_TOKEN) {
+  console.error('[index] STATUS_URL is set but STATUS_TOKEN is not. Not reporting viewer counts.');
+} else if (STATUS_URL) {
+  startStatusReporter({
+    url: STATUS_URL,
+    token: STATUS_TOKEN,
+    getCount: () => countOpenClients(display.wss),
+    intervalMs: readPositiveInt('USER_COUNT_INTERVAL_MS', DEFAULT_INTERVAL_MS),
+    keepaliveMs: readPositiveInt('USER_COUNT_KEEPALIVE_MS', DEFAULT_KEEPALIVE_MS),
+  });
+}
+
+/**
+ * Read a positive integer env var, falling back when unset or invalid.
+ */
+function readPositiveInt(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return fallback;
+
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    console.warn(`[index] Ignoring invalid ${name}="${raw}"`);
+    return fallback;
+  }
+  return value;
+}

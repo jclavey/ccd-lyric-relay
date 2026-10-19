@@ -54,7 +54,7 @@ Then open `http://localhost:8080`, and point a bridge at
 | `EVENT_SOURCE_PORT` | `3000` | Port for the bridge's WebSocket |
 | `DISPLAY_SERVER_PORT` | `8080` | Port for the display page and browser WebSocket |
 | `STATE_GRACE_MS` | `60000` | How long to keep showing the last slide after an unexpected bridge drop |
-| `STATUS_URL` | *(off)* | Base URL of the status dashboard. Viewer counts are reported only when this is set |
+| `STATUS_URL` | *(off)* | Base URL of the status dashboard, e.g. `https://ccd-bridge-status.up.railway.app` (https is assumed if the scheme is left off). Viewer counts are reported only when this is set |
 | `STATUS_TOKEN` | *(none)* | Bearer token for the dashboard (its `INBOUND_API_TOKEN`). Required with `STATUS_URL` |
 | `USER_COUNT_INTERVAL_MS` | `60000` | How often the viewer count is checked |
 | `USER_COUNT_KEEPALIVE_MS` | `600000` | While anyone is connected, re-send an unchanged count this often |

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 const WebSocket = require('ws');
-const { startStatusReporter, countOpenClients } = require('../src/status-reporter');
+const { startStatusReporter, countOpenClients, ingestEndpoint } = require('../src/status-reporter');
 const { startDisplayServer } = require('../src/display-server');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -322,4 +322,19 @@ test('counts the browsers connected to the display server, and only open ones', 
   await reporter.tick();
   assert.deepEqual(sent.map((s) => [s.count, s.reason]), [[0, 'start'], [2, 'change']]);
   c.terminate();
+});
+
+test('builds the endpoint from the URL, assuming https when there is no scheme', () => {
+  assert.equal(ingestEndpoint('https://status.example.com'), 'https://status.example.com/ingest/users');
+  assert.equal(ingestEndpoint('https://status.example.com///'), 'https://status.example.com/ingest/users');
+  assert.equal(ingestEndpoint('http://localhost:3055/'), 'http://localhost:3055/ingest/users');
+  assert.equal(ingestEndpoint('HTTPS://status.example.com'), 'HTTPS://status.example.com/ingest/users');
+  assert.equal(ingestEndpoint('ccd-bridge-status.up.railway.app'), 'https://ccd-bridge-status.up.railway.app/ingest/users');
+  assert.equal(ingestEndpoint('  ccd-bridge-status.up.railway.app/ '), 'https://ccd-bridge-status.up.railway.app/ingest/users');
+});
+
+test('a URL without a scheme is requested over https', async (t) => {
+  const { state, reporter } = setup(t, { url: 'status.example.com' });
+  await reporter.ready;
+  assert.equal(state.requests[0].url, 'https://status.example.com/ingest/users');
 });

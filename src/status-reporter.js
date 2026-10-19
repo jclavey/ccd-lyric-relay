@@ -27,6 +27,17 @@ const DEFAULT_KEEPALIVE_MS = 10 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
+ * The ingest endpoint for a base URL. A URL pasted without a scheme (as
+ * Railway shows domains) is taken to be https, since `fetch` cannot parse it.
+ * @param {string} url
+ */
+function ingestEndpoint(url) {
+  const trimmed = url.trim().replace(/\/+$/, '');
+  const base = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return `${base}/ingest/users`;
+}
+
+/**
  * @param {import('ws').Server} wss
  * @returns {number} browsers with an open connection
  */
@@ -64,7 +75,7 @@ function startStatusReporter({
   if (!url) throw new Error('A status app URL is required');
   if (!token) throw new Error('A status app token is required');
 
-  const endpoint = `${url.replace(/\/+$/, '')}/ingest/users`;
+  const endpoint = ingestEndpoint(url);
   let lastSent = null; // { count, at } of the last send that succeeded
   let needsStart = true;
   let sending = false;
@@ -135,4 +146,4 @@ function startStatusReporter({
   };
 }
 
-module.exports = { startStatusReporter, countOpenClients, DEFAULT_INTERVAL_MS, DEFAULT_KEEPALIVE_MS };
+module.exports = { startStatusReporter, countOpenClients, ingestEndpoint, DEFAULT_INTERVAL_MS, DEFAULT_KEEPALIVE_MS };
